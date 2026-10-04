@@ -95,7 +95,7 @@ A conta do proprietário é criada como superusuário ativo (`is_staff=True`, `i
 
 O cadastro de novos barbeiros é realizado pelo proprietário:
 - Via endpoint administrativo: `POST /api/proprietario/barbeiros/cadastrar/`
-- Ou pelo painel nativo do Django (`/admin/`) autenticado como superusuário.
+- Ou pelo painel nativo do Django no endereço privado configurado em `DJANGO_ADMIN_SECRET_PATH`, autenticado como proprietário.
 
 As contas de barbeiros são criadas com privilégios restritos: `is_staff=False`, `is_superuser=False`.
 
@@ -440,7 +440,7 @@ WantedBy=multi-user.target
 - Instalação e service worker exigem HTTPS, exceto localhost. No Android use “Adicionar à tela inicial”; no Safari/iPhone use Compartilhar → Adicionar à Tela de Início. A oferta depende do navegador.
 - O service worker guarda apenas CSS, JavaScript, fontes, imagens públicas e uma página offline genérica. APIs, formulários, sessões e dados pessoais **não** são armazenados em cache. A fila exige conexão e não aceita operações offline.
 - Polling: 5 segundos na home, 2 segundos nos painéis visíveis. O servidor decide todos os prazos; o navegador só apresenta a contagem e o som, limitado ao tempo restante do ciclo atual. A confirmação de presença permanece exclusiva do barbeiro.
-- O editor genérico `/admin/` foi desabilitado para evitar alterações que contornem os serviços transacionais e registros de auditoria com nomes de participantes. Use a gestão dedicada.
+- O admin nativo está disponível somente na rota de oito caracteres configurada em `DJANGO_ADMIN_SECRET_PATH` no `.env`. `/admin/` continua ausente. Exige superusuário ativo com senha; usuários comuns e apenas staff não entram. O endereço não aparece nos links públicos nem na página 404 de desenvolvimento. O login privado tem limite de tentativas por IP. Para operações da fila, prefira a gestão dedicada, que aplica as transições e exclusões de dados; o admin nativo é uma ferramenta de manutenção direta.
 - Um IP pode representar uma rede compartilhada: as 30 tentativas podem ser consumidas por várias pessoas dessa rede.
 
 ### Privacidade dos backups
@@ -454,3 +454,14 @@ Apagar o registro do banco ativo não apaga cópias de backup anteriores nem equ
 - Fluxo real no Edge automatizado: cadastro → chamada → início → finalização → exclusão; gestão de profissionais; desligamento da cadeira; página offline. Banco de validação separado do banco real.
 - Capturas revisadas de home, cadastro, login, acompanhamento, cadeira e gestão. Verificações de layout em 320, 360, 432 e 1280 pixels.
 - A reprodução sonora foi ativada e o contrato verificado; volume audível em aparelhos físicos e instalação em iPhone/Android precisam ser conferidos nesses aparelhos.
+
+
+## Fotos dos barbeiros
+
+No cadastro e na edição do profissional, o proprietário pode escolher uma foto própria, ver a prévia, substituí-la ou removê-la. Também é possível enviar a foto pelo admin nativo. O campo é opcional e exclusivo do modelo Barbeiro; clientes continuam com apenas os dados temporários da fila.
+
+As APIs de cadastrar/editar barbeiro aceitam também `multipart/form-data`, com o campo `foto` (arquivo) e os campos textuais anteriores. Para remover: `remover_foto=on`. JSON sem foto continua compatível. As respostas de cadeiras/perfis incluem `foto_url` pública ou `null`.
+
+São aceitos JPG, PNG e WebP de até 5 MB e 16 megapixels. O conteúdo é validado e convertido em JPEG de até 1024 × 1024, com orientação corrigida, nome aleatório e metadados removidos. Fotos substituídas/removidas são excluídas do armazenamento após confirmar a alteração no banco.
+
+Uploads ficam em `media/barbeiros/`, fora do Git. Em produção, configure o servidor HTTP para servir `/media/` como arquivos estáticos, sem execução de scripts, e inclua a pasta `media/` no backup. O Django serve essa pasta automaticamente apenas no desenvolvimento. Sem upload, permanece o retrato ilustrativo ou as iniciais existentes.

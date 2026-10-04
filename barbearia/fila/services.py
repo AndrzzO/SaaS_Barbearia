@@ -139,6 +139,7 @@ def listar_cadeiras_publicas() -> List[Dict[str, Any]]:
         resultado.append({
             'identificador_barbeiro': b.id,
             'nome_exibicao': b.nome_exibicao,
+            'foto_url': b.foto_url,
             'ativo': b.ativo,
             'online': b.online,
             'aceita_entrada': b.aceita_entrada,

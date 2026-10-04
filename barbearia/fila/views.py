@@ -249,6 +249,7 @@ def cliente_acompanhamento(request: HttpRequest) -> JsonResponse:
         'barbeiro': {
             'id': participacao.barbeiro_id,
             'nome_exibicao': participacao.barbeiro.nome_exibicao,
+            'foto_url': participacao.barbeiro.foto_url,
             'online': participacao.barbeiro.online,
         }
     }
@@ -306,6 +307,7 @@ def barbeiro_login(request: HttpRequest) -> JsonResponse:
         'barbeiro': {
             'id': user.barbeiro.id,
             'nome_exibicao': user.barbeiro.nome_exibicao,
+            'foto_url': user.barbeiro.foto_url,
             'online': user.barbeiro.online,
         }
     })
@@ -348,6 +350,7 @@ def barbeiro_painel_operacional(request: HttpRequest, barbeiro: Barbeiro) -> Jso
         'barbeiro': {
             'id': barbeiro.id,
             'nome_exibicao': barbeiro.nome_exibicao,
+            'foto_url': barbeiro.foto_url,
             'ativo': barbeiro.ativo,
             'online': barbeiro.online,
             'proxima_ordem_fila': barbeiro.proxima_ordem_fila,
@@ -499,6 +502,7 @@ def proprietario_listar_barbeiros(request: HttpRequest) -> JsonResponse:
             'id': b.id,
             'username': b.usuario.username,
             'nome_exibicao': b.nome_exibicao,
+            'foto_url': b.foto_url,
             'ativo': b.ativo,
             'online': b.online,
             'usuario_ativo': b.usuario.is_active,
@@ -512,7 +516,7 @@ def proprietario_listar_barbeiros(request: HttpRequest) -> JsonResponse:
 @tratar_excecoes_fila
 def proprietario_cadastrar_barbeiro(request: HttpRequest) -> JsonResponse:
     """Cadastra um novo barbeiro com conta padrão sem privilégios administrativos (Passo 16)."""
-    dados = extrair_json(request)
+    dados = request.POST if request.content_type == 'multipart/form-data' else extrair_json(request)
     username = dados.get('username', '').strip()
     senha = dados.get('senha', '')
     nome_exibicao = dados.get('nome_exibicao', '').strip()
@@ -532,12 +536,13 @@ def proprietario_cadastrar_barbeiro(request: HttpRequest) -> JsonResponse:
         user = User.objects.create_user(username=username, password=senha,
             is_staff=False, is_superuser=False, is_active=True)
         return Barbeiro.objects.create(usuario=user, nome_exibicao=nome_exibicao,
-            ativo=True, online=False, proxima_ordem_fila=1)
+            ativo=True, online=False, proxima_ordem_fila=1, foto=request.FILES.get('foto', ''))
     barbeiro = executar_com_retentativas_sqlite(criar)
 
     return resposta_json_no_store({
         'mensagem': f"Barbeiro {nome_exibicao} cadastrado com sucesso.",
         'barbeiro_id': barbeiro.id,
+        'foto_url': barbeiro.foto_url,
     }, status=201)
 
 
@@ -551,16 +556,23 @@ def proprietario_editar_barbeiro(request: HttpRequest, barbeiro_id: int) -> Json
     except Barbeiro.DoesNotExist:
         return resposta_json_no_store({'erro': "Barbeiro não encontrado."}, status=404)
 
-    dados = extrair_json(request)
+    dados = request.POST if request.content_type == 'multipart/form-data' else extrair_json(request)
     novo_nome = dados.get('nome_exibicao', '').strip()
     if not novo_nome:
         return resposta_json_no_store({'erro': "O nome de exibição não pode ser vazio."}, status=400)
 
     if len(novo_nome) > 100:
         raise ValidacaoFilaError("O nome deve ter no máximo 100 caracteres.")
-    barbeiro.nome_exibicao = novo_nome
-    barbeiro.save(update_fields=['nome_exibicao'])
-    return resposta_json_no_store({'mensagem': "Nome de exibição atualizado com sucesso."})
+    def editar():
+        barbeiro.refresh_from_db()
+        barbeiro.nome_exibicao = novo_nome
+        if request.FILES.get('foto'):
+            barbeiro.foto = request.FILES['foto']
+        elif dados.get('remover_foto') in (True, 'true', 'on'):
+            barbeiro.foto = ''
+        barbeiro.save(update_fields=['nome_exibicao', 'foto'])
+    executar_com_retentativas_sqlite(editar)
+    return resposta_json_no_store({'mensagem': 'Perfil atualizado com sucesso.', 'foto_url': barbeiro.foto_url})
 
 
 @require_POST

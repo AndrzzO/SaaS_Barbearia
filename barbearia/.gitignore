@@ -42,3 +42,5 @@ htmlcov/
 .verificacao/
 test_fila.sqlite3*
 staticfiles/
+
+media/

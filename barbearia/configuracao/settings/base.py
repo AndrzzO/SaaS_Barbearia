@@ -134,3 +134,15 @@ TRUSTED_PROXY_IPS = [ip.strip() for ip in trusted_proxies_raw.split(',') if ip.s
 # Permite banco isolado para validação sem alterar os dados locais.
 if os.environ.get("SQLITE_PATH"):
     DATABASES["default"]["NAME"] = os.environ["SQLITE_PATH"]
+
+# Endereço privado do admin: definido localmente, nunca publicado nos templates.
+ADMIN_SECRET_PATH = os.environ.get('DJANGO_ADMIN_SECRET_PATH', '')
+if ADMIN_SECRET_PATH:
+    import re
+    from django.core.exceptions import ImproperlyConfigured
+    if not re.fullmatch(r'[A-Za-z0-9]{8}', ADMIN_SECRET_PATH):
+        raise ImproperlyConfigured('DJANGO_ADMIN_SECRET_PATH deve conter oito letras/números.')
+MIDDLEWARE.insert(0, 'fila.middleware.OcultarRotas404Middleware')
+
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"

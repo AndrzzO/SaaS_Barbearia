@@ -5,7 +5,8 @@ Backend 100% Python, Django e SQLite.
 
 import uuid
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
+from fila.fotos import caminho_foto, validar_foto, preparar_foto
 from django.db.models import Q, F
 from django.utils import timezone
 
@@ -24,6 +25,34 @@ class Barbeiro(models.Model):
         max_length=100,
         verbose_name="Nome de exibição"
     )
+    foto = models.ImageField(upload_to=caminho_foto, blank=True,
+        validators=[validar_foto], verbose_name="Foto do barbeiro")
+
+    def save(self, *args, **kwargs):
+        atualiza_foto = kwargs.get('update_fields') is None or 'foto' in kwargs['update_fields']
+        if not atualiza_foto:
+            return super().save(*args, **kwargs)
+        nova = preparar_foto(self.foto) if self.foto and not self.foto._committed else None
+        if nova is not None:
+            self.foto = nova
+        storage = self._meta.get_field('foto').storage
+        try:
+            with transaction.atomic():
+                antiga = type(self).objects.filter(pk=self.pk).values_list('foto', flat=True).first() if self.pk else None
+                resultado = super().save(*args, **kwargs)
+                if antiga and antiga != self.foto.name:
+                    transaction.on_commit(lambda: storage.delete(antiga))
+                return resultado
+        except Exception:
+            if nova is not None and self.foto._committed:
+                storage.delete(self.foto.name)
+                self.foto = nova
+            raise
+
+    @property
+    def foto_url(self):
+        return self.foto.url if self.foto else None
+
     ativo = models.BooleanField(
         default=True,
         verbose_name="Ativo"
