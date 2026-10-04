@@ -1,3 +1,9 @@
+# Backend SaaS
+
+**A documentação atual está em [docs/SAAS.md](docs/SAAS.md).** A descrição abaixo registra a base single tenant e seus contratos operacionais; as rotas agora exigem `/b/<slug>/` e o dono usa Google com vínculo de empresa. Administrador GTS e dono são contas distintas.
+
+---
+
 # Sistema de Fila para Barbearia — Guild Tech Support
 
 Aplicativo Django + SQLite com interface mobile em português e PWA, desenvolvido pela **Guild Tech Support**.

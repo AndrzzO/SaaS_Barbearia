@@ -20,6 +20,7 @@ class TestWorkerEComandos(TestCase):
     """Testa o comando processar_filas e limpar_registros_seguranca."""
 
     def setUp(self):
+        preparar_tenant()
         self.user_barbeiro = User.objects.create_user(
             username="barbeiro_worker",
             password="senha_worker_123"
@@ -30,7 +31,7 @@ class TestWorkerEComandos(TestCase):
             ativo=True,
             online=True,
             proxima_ordem_fila=1
-        )
+        , barbearia_id=TENANT_ID)
 
     def test_comando_processar_filas_once(self):
         # Cria participante chamado com prazo vencido
@@ -40,7 +41,7 @@ class TestWorkerEComandos(TestCase):
             sobrenome_raw="Mendes",
             telefone_raw="(11) 98765-4321",
             data_nascimento_input=date(1996, 5, 10)
-        )
+        , barbearia_id=TENANT_ID)
         self.assertEqual(p1.status, StatusParticipacao.CHAMADO)
 
         p1.chamada_iniciada_em = timezone.now() - timedelta(seconds=40)
@@ -70,7 +71,7 @@ class TestWorkerEComandos(TestCase):
             sobrenome_raw="Mendes",
             telefone_raw="(11) 98765-4321",
             data_nascimento_input=date(1996, 5, 10)
-        )
+        , barbearia_id=TENANT_ID)
         # Chamada que expirou há 3 horas
         p1.chamada_iniciada_em = timezone.now() - timedelta(hours=3, seconds=30)
         p1.chamada_expira_em = timezone.now() - timedelta(hours=3)
@@ -122,3 +123,5 @@ class TestWorkerEComandos(TestCase):
         self.assertFalse(RegistroTentativaLoginIP.objects.filter(pk=r2.pk).exists())
         # Bloqueio vigente foi preservado!
         self.assertTrue(RegistroTentativaLoginIP.objects.filter(pk=r3.pk).exists())
+
+from fila.tests.tenant_fixture import TENANT_ID, preparar_tenant, criar_dono

@@ -1,4 +1,4 @@
-"""Criação local do proprietário com senha oculta no modo interativo."""
+"""Criação local do administrador GTS (nome legado do comando) com senha oculta no modo interativo."""
 import getpass
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
@@ -7,7 +7,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 class Command(BaseCommand):
-    help = 'Cria ou atualiza o proprietário; sem parâmetros, solicita usuário e senha oculta.'
+    help = 'Cria ou atualiza administrador GTS; sem parâmetros, solicita usuário e senha oculta.'
 
     def add_arguments(self, parser):
         parser.add_argument('--username', default=None)
@@ -15,7 +15,7 @@ class Command(BaseCommand):
         parser.add_argument('--email', default='')
 
     def handle(self, *args, **options):
-        username = (options['username'] or input('Usuário do proprietário: ')).strip()
+        username = (options['username'] or input('Usuário do administrador GTS: ')).strip()
         senha = options['senha']
         if senha is None:
             senha = getpass.getpass('Senha: ')
@@ -32,9 +32,11 @@ class Command(BaseCommand):
             raise CommandError(' '.join(exc.messages)) from exc
         with transaction.atomic():
             usuario, criado = User.objects.get_or_create(username=username)
+            if not criado and not usuario.is_superuser:
+                raise CommandError('Não converta uma conta operacional/dono em administrador GTS. Use outro usuário.')
             usuario.set_password(senha)
             usuario.is_staff = usuario.is_superuser = usuario.is_active = True
             if options['email']:
                 usuario.email = options['email']
             usuario.save()
-        self.stdout.write(self.style.SUCCESS('Proprietário criado.' if criado else 'Proprietário atualizado.'))
+        self.stdout.write(self.style.SUCCESS('Administrador GTS criado.' if criado else 'Administrador GTS atualizado.'))

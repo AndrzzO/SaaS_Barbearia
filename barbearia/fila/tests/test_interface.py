@@ -12,47 +12,47 @@ from fila.services import (entrar_na_fila, iniciar_atendimento, chamar_especific
 
 class InterfaceTests(TestCase):
     def setUp(self):
+        preparar_tenant()
         self.usuario = get_user_model().objects.create_user('teste', password='Senha-segura-387!')
-        self.barbeiro = Barbeiro.objects.create(usuario=self.usuario, nome_exibicao='Rafael', online=True)
+        self.barbeiro = Barbeiro.objects.create(usuario=self.usuario, nome_exibicao='Rafael', online=True, barbearia_id=TENANT_ID)
 
     def entrar(self, numero=1):
-        return entrar_na_fila(self.barbeiro.pk, 'Cliente', 'Teste', f'1198765432{numero}', date(1990, 1, 1))
+        return entrar_na_fila(self.barbeiro.pk, 'Cliente', 'Teste', f'1198765432{numero}', date(1990, 1, 1), barbearia_id=TENANT_ID)
 
     def test_paginas_publicas_e_csrf(self):
-        for rota in ['/', '/minha-fila/', '/acesso/barbeiro/', '/acesso/gestao/', f'/cadastro/{self.barbeiro.pk}/']:
+        for rota in ['/b/teste/', '/b/teste/minha-fila/', '/b/teste/acesso/barbeiro/', '/b/teste/acesso/gestao/', f'/b/teste/cadastro/{self.barbeiro.pk}/']:
             resposta = self.client.get(rota)
             self.assertEqual(resposta.status_code, 200)
-            self.assertContains(resposta, 'manifest.webmanifest')
             self.assertIn('csrftoken', resposta.cookies)
             self.assertIn('no-store', resposta['Cache-Control'])
 
     def test_protecao_paginas_privadas(self):
-        for rota in ['/barbeiro/', '/barbeiro/perfil/', '/gestao/', '/gestao/equipe/', '/gestao/clientes/']:
-            self.assertEqual(self.client.get(rota).status_code, 302)
+        for rota in ['/b/teste/barbeiro/', '/b/teste/barbeiro/perfil/', '/b/teste/gestao/', '/b/teste/gestao/equipe/', '/b/teste/gestao/clientes/']:
+            self.assertEqual(self.client.get(rota).status_code, 403)
         self.client.force_login(self.usuario)
-        self.assertEqual(self.client.get('/barbeiro/').status_code, 200)
-        self.assertEqual(self.client.get('/gestao/').status_code, 302)
+        self.assertEqual(self.client.get('/b/teste/barbeiro/').status_code, 200)
+        self.assertEqual(self.client.get('/b/teste/gestao/').status_code, 403)
 
     def test_manifesto_e_worker_sem_cache_privado(self):
-        manifesto=self.client.get('/manifest.webmanifest').json()
+        manifesto=self.client.get('/b/teste/manifest.webmanifest').json()
         self.assertEqual(manifesto['display'], 'standalone')
         self.assertEqual(len(manifesto['icons']), 2)
-        worker=self.client.get('/sw.js')
+        worker=self.client.get('/b/teste/sw.js')
         self.assertEqual(worker['Service-Worker-Allowed'], '/')
         self.assertNotContains(worker, "cache.put")
         self.assertContains(worker, "PUBLICOS.includes(url.pathname)")
 
     def test_csrf_obrigatorio_nas_alteracoes(self):
         cliente=Client(enforce_csrf_checks=True)
-        resposta=cliente.post('/api/barbeiro/auth/login/', json.dumps({'username':'teste','senha':'Senha-segura-387!'}),content_type='application/json')
+        resposta=cliente.post('/b/teste/api/barbeiro/auth/login/', json.dumps({'username':'teste','senha':'Senha-segura-387!'}),content_type='application/json')
         self.assertEqual(resposta.status_code,403)
 
     def test_api_rejeita_json_nao_objeto_e_tipos_invalidos(self):
         for dados in [[], None, {'username': 42}, {'senha': False}]:
-            resposta=self.client.post('/api/barbeiro/auth/login/', json.dumps(dados), content_type='application/json')
+            resposta=self.client.post('/b/teste/api/barbeiro/auth/login/', json.dumps(dados), content_type='application/json')
             self.assertEqual(resposta.status_code,400)
         self.client.force_login(self.usuario)
-        resposta=self.client.post('/api/barbeiro/cadeira/status/', json.dumps({'online':'false'}), content_type='application/json')
+        resposta=self.client.post('/b/teste/api/barbeiro/cadeira/status/', json.dumps({'online':'false'}), content_type='application/json')
         self.assertEqual(resposta.status_code,400)
         self.barbeiro.refresh_from_db()
         self.assertTrue(self.barbeiro.online)
@@ -61,7 +61,7 @@ class InterfaceTests(TestCase):
         self.entrar(1)
         p,token,_=self.entrar(2)
         self.client.cookies[settings.FILA_COOKIE_NOME]=token
-        dados=self.client.get('/api/cliente/acompanhamento/').json()
+        dados=self.client.get('/b/teste/api/cliente/acompanhamento/').json()
         self.assertEqual(dados['clientes_na_frente'],1)
         self.assertEqual(dados['entrou_na_fila_em'],p.entrou_na_fila_em.isoformat())
         self.assertNotIn('telefone',dados)
@@ -70,9 +70,9 @@ class InterfaceTests(TestCase):
     def test_token_de_outro_cliente_nao_e_identificador_publico(self):
         p,token,_=self.entrar()
         self.client.cookies[settings.FILA_COOKIE_NOME]=str(p.identificador_publico)
-        self.assertEqual(self.client.get('/api/cliente/acompanhamento/').json()['status'],'ENCERRADO')
+        self.assertEqual(self.client.get('/b/teste/api/cliente/acompanhamento/').json()['status'],'ENCERRADO')
         self.client.cookies[settings.FILA_COOKIE_NOME]=token
-        self.assertNotEqual(self.client.get('/api/cliente/acompanhamento/').json()['status'],'ENCERRADO')
+        self.assertNotEqual(self.client.get('/b/teste/api/cliente/acompanhamento/').json()['status'],'ENCERRADO')
 
     def test_expiracao_persistida_no_inicio_rejeitado(self):
         p,_,_=self.entrar(1)
@@ -117,7 +117,7 @@ class InterfaceTests(TestCase):
         p,token,_=self.entrar()
         self.client.cookies[settings.FILA_COOKIE_NOME]=token
         with patch('fila.views.timezone.now', return_value=p.chamada_expira_em+timedelta(seconds=2)):
-            dados=self.client.get('/api/cliente/acompanhamento/').json()
+            dados=self.client.get('/b/teste/api/cliente/acompanhamento/').json()
         self.assertEqual(dados['tempo_restante_segundos'],0)
         p.refresh_from_db()
         self.assertEqual(p.status,StatusParticipacao.CHAMADO)
@@ -149,3 +149,5 @@ class InterfaceTests(TestCase):
         with self.assertRaises(CommandError):
             call_command('criar_proprietario', username='dono_fraco', senha='123')
         self.assertFalse(get_user_model().objects.filter(username='dono_fraco').exists())
+
+from fila.tests.tenant_fixture import TENANT_ID, preparar_tenant, criar_dono

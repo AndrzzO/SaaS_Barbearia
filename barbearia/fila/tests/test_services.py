@@ -35,7 +35,8 @@ class TestServicosFila(TestCase):
     """Testes completos das regras operacionais da barbearia."""
 
     def setUp(self):
-        self.user_proprietario = User.objects.create_superuser(
+        preparar_tenant()
+        self.user_proprietario = criar_dono(
             username="dono",
             password="dono_senha_123"
         )
@@ -49,7 +50,7 @@ class TestServicosFila(TestCase):
             ativo=True,
             online=True,
             proxima_ordem_fila=1
-        )
+        , barbearia_id=TENANT_ID)
 
         self.user_barbeiro2 = User.objects.create_user(
             username="barbeiro2",
@@ -61,10 +62,10 @@ class TestServicosFila(TestCase):
             ativo=True,
             online=False,
             proxima_ordem_fila=1
-        )
+        , barbearia_id=TENANT_ID)
 
     def test_listar_cadeiras_publicas(self):
-        cadeiras = listar_cadeiras_publicas()
+        cadeiras = listar_cadeiras_publicas( barbearia_id=TENANT_ID)
         self.assertEqual(len(cadeiras), 2)
         # Cadeira 1 está online e aceita entrada
         c1 = next(c for c in cadeiras if c['identificador_barbeiro'] == self.barbeiro1.id)
@@ -86,7 +87,7 @@ class TestServicosFila(TestCase):
             sobrenome_raw="Eduardo",
             telefone_raw="(11) 98765-4321",
             data_nascimento_input=date(1998, 4, 15)
-        )
+        , barbearia_id=TENANT_ID)
         self.assertFalse(reapresentado)
         self.assertEqual(p1.status, StatusParticipacao.CHAMADO)
         self.assertIsNotNone(p1.chamada_iniciada_em)
@@ -101,7 +102,7 @@ class TestServicosFila(TestCase):
             sobrenome_raw="Costa",
             telefone_raw="(11) 98765-4322",
             data_nascimento_input=date(2000, 8, 20)
-        )
+        , barbearia_id=TENANT_ID)
         self.assertFalse(reapresentado2)
         self.assertEqual(p2.status, StatusParticipacao.AGUARDANDO)
         self.assertEqual(p2.ordem_fila, 2)
@@ -113,7 +114,7 @@ class TestServicosFila(TestCase):
             sobrenome_raw="Eduardo",
             telefone_raw="(11) 98765-4321",
             data_nascimento_input=date(1998, 4, 15)
-        )
+        , barbearia_id=TENANT_ID)
         # Reenvio com o mesmo token recebido no cookie
         p_reapresentado, token_retornado, reapresentou = entrar_na_fila(
             barbeiro_id=self.barbeiro1.id,
@@ -122,7 +123,7 @@ class TestServicosFila(TestCase):
             telefone_raw="(11) 99999-9999",
             data_nascimento_input=date(1990, 1, 1),
             token_cliente_atual=token1
-        )
+        , barbearia_id=TENANT_ID)
         self.assertTrue(reapresentou)
         self.assertEqual(p_reapresentado.pk, p1.pk)
         self.assertEqual(token_retornado, token1)
@@ -134,7 +135,7 @@ class TestServicosFila(TestCase):
             sobrenome_raw="Eduardo",
             telefone_raw="(11) 98765-4321",
             data_nascimento_input=date(1998, 4, 15)
-        )
+        , barbearia_id=TENANT_ID)
         # Outro navegador/solicitante tentando mesmo telefone sem o token
         with self.assertRaises(DuplicidadeTelefoneError):
             entrar_na_fila(
@@ -144,7 +145,7 @@ class TestServicosFila(TestCase):
                 telefone_raw="(11) 98765-4321",
                 data_nascimento_input=date(1995, 1, 1),
                 token_cliente_atual=None
-            )
+            , barbearia_id=TENANT_ID)
 
     def test_rejeicao_entrada_cadeira_offline(self):
         with self.assertRaises(ConflitoEstadoError):
@@ -154,7 +155,7 @@ class TestServicosFila(TestCase):
                 sobrenome_raw="Silveira",
                 telefone_raw="(11) 98765-4323",
                 data_nascimento_input=date(1992, 10, 5)
-            )
+            , barbearia_id=TENANT_ID)
 
     def test_expiracao_de_chamada_30s_e_reposicionamento(self):
         p1, token1, _ = entrar_na_fila(
@@ -163,14 +164,14 @@ class TestServicosFila(TestCase):
             sobrenome_raw="Um",
             telefone_raw="(11) 98765-4321",
             data_nascimento_input=date(1998, 4, 15)
-        )
+        , barbearia_id=TENANT_ID)
         p2, token2, _ = entrar_na_fila(
             barbeiro_id=self.barbeiro1.id,
             primeiro_nome_raw="Cliente",
             sobrenome_raw="Dois",
             telefone_raw="(11) 98765-4322",
             data_nascimento_input=date(1995, 3, 20)
-        )
+        , barbearia_id=TENANT_ID)
         self.assertEqual(p1.status, StatusParticipacao.CHAMADO)
         self.assertEqual(p2.status, StatusParticipacao.AGUARDANDO)
 
@@ -210,7 +211,7 @@ class TestServicosFila(TestCase):
             sobrenome_raw="Faltoso",
             telefone_raw="(11) 98765-4321",
             data_nascimento_input=date(1998, 4, 15)
-        )
+        , barbearia_id=TENANT_ID)
         self.assertEqual(p1.status, StatusParticipacao.CHAMADO)
 
         # 4 outros clientes entram na fila com nomes alfabéticos
@@ -223,7 +224,7 @@ class TestServicosFila(TestCase):
                 sobrenome_raw="Teste",
                 telefone_raw=f"(11) 98765-432{i}",
                 data_nascimento_input=date(1990, 1, 1)
-            )
+            , barbearia_id=TENANT_ID)
             tokens_outros.append(p)
 
         # 1ª Falta de P1 mantendo expira > inicio
@@ -272,7 +273,7 @@ class TestServicosFila(TestCase):
                     sobrenome_raw="Teste",
                     telefone_raw=f"(11) 98765-433{falta}",
                     data_nascimento_input=date(1990, 1, 1)
-                )
+                , barbearia_id=TENANT_ID)
 
             # Chama proximo_cliente se não chamado
             if proximo_cliente.status != StatusParticipacao.CHAMADO:
@@ -297,14 +298,14 @@ class TestServicosFila(TestCase):
             sobrenome_raw="Um",
             telefone_raw="(11) 98765-4321",
             data_nascimento_input=date(1998, 4, 15)
-        )
+        , barbearia_id=TENANT_ID)
         p2, _, _ = entrar_na_fila(
             barbeiro_id=self.barbeiro1.id,
             primeiro_nome_raw="Segundo",
             sobrenome_raw="Dois",
             telefone_raw="(11) 98765-4322",
             data_nascimento_input=date(1995, 3, 20)
-        )
+        , barbearia_id=TENANT_ID)
         self.assertEqual(p1.status, StatusParticipacao.CHAMADO)
         self.assertEqual(p2.status, StatusParticipacao.AGUARDANDO)
 
@@ -333,14 +334,14 @@ class TestServicosFila(TestCase):
             sobrenome_raw="Um",
             telefone_raw="(11) 98765-4321",
             data_nascimento_input=date(1998, 4, 15)
-        )
+        , barbearia_id=TENANT_ID)
         p2, token2, _ = entrar_na_fila(
             barbeiro_id=self.barbeiro1.id,
             primeiro_nome_raw="Segundo",
             sobrenome_raw="Dois",
             telefone_raw="(11) 98765-4322",
             data_nascimento_input=date(1995, 3, 20)
-        )
+        , barbearia_id=TENANT_ID)
 
         # p1 sai da fila voluntariamente
         sair_da_fila(p1)
@@ -357,7 +358,7 @@ class TestServicosFila(TestCase):
             sobrenome_raw="Um",
             telefone_raw="(11) 98765-4321",
             data_nascimento_input=date(1998, 4, 15)
-        )
+        , barbearia_id=TENANT_ID)
         iniciar_atendimento(self.barbeiro1, p1.pk, str(p1.identificador_chamada))
         p1.refresh_from_db()
         self.assertEqual(p1.status, StatusParticipacao.EM_ATENDIMENTO)
@@ -373,7 +374,7 @@ class TestServicosFila(TestCase):
             sobrenome_raw="Um",
             telefone_raw="(11) 98765-4321",
             data_nascimento_input=date(1998, 4, 15)
-        )
+        , barbearia_id=TENANT_ID)
         iniciar_atendimento(self.barbeiro1, p1.pk, str(p1.identificador_chamada))
 
         # p2 e p3 entram na fila
@@ -383,14 +384,14 @@ class TestServicosFila(TestCase):
             sobrenome_raw="Dois",
             telefone_raw="(11) 98765-4322",
             data_nascimento_input=date(1995, 3, 20)
-        )
+        , barbearia_id=TENANT_ID)
         p3, _, _ = entrar_na_fila(
             barbeiro_id=self.barbeiro1.id,
             primeiro_nome_raw="Espera",
             sobrenome_raw="Tres",
             telefone_raw="(11) 98765-4323",
             data_nascimento_input=date(1994, 2, 10)
-        )
+        , barbearia_id=TENANT_ID)
 
         # Barbeiro desliga a cadeira
         alternar_status_cadeira(self.barbeiro1, ficar_online=False)
@@ -417,7 +418,7 @@ class TestServicosFila(TestCase):
             sobrenome_raw="Um",
             telefone_raw="(11) 98765-4321",
             data_nascimento_input=date(1998, 4, 15)
-        )
+        , barbearia_id=TENANT_ID)
         iniciar_atendimento(self.barbeiro1, p1.pk, str(p1.identificador_chamada))
 
         with self.assertRaises(ConflitoEstadoError):
@@ -432,3 +433,5 @@ class TestServicosFila(TestCase):
         self.assertFalse(self.barbeiro1.ativo)
         self.assertFalse(self.barbeiro1.online)
         self.assertFalse(self.barbeiro1.usuario.is_active)
+
+from fila.tests.tenant_fixture import TENANT_ID, preparar_tenant, criar_dono

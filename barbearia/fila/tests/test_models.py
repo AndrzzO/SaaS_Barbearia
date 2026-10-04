@@ -107,6 +107,7 @@ class TestModelosERestricoes(TestCase):
     """Testa os modelos, restrições e cálculos dinâmicos."""
 
     def setUp(self):
+        preparar_tenant()
         self.usuario_barbeiro = User.objects.create_user(
             username="carlos",
             password="senha_segura_123",
@@ -119,7 +120,7 @@ class TestModelosERestricoes(TestCase):
             ativo=True,
             online=True,
             proxima_ordem_fila=1
-        )
+        , barbearia_id=TENANT_ID)
 
     def test_criacao_barbeiro(self):
         self.assertTrue(self.barbeiro.aceita_entrada)
@@ -420,3 +421,5 @@ class TestModelosERestricoes(TestCase):
                 )
 
 
+
+from fila.tests.tenant_fixture import TENANT_ID, preparar_tenant, criar_dono

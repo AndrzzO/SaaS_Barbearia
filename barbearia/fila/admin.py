@@ -20,7 +20,7 @@ class LoginProprietarioForm(AdminAuthenticationForm):
 
 
 class AdminProprietario(admin.AdminSite):
-    site_header = 'Administração da Barbearia'
+    site_header = 'Administração GTS'
     site_title = 'Administração privada'
     login_form = LoginProprietarioForm
 
@@ -69,3 +69,6 @@ class RegistroTentativaLoginIPAdmin(admin.ModelAdmin):
     list_filter = ('escopo',)
     search_fields = ('ip',)
     readonly_fields = ('primeira_tentativa_em', 'ultima_tentativa_em')
+
+site_proprietario.unregister(ParticipacaoFila)
+site_proprietario.unregister(Barbeiro)

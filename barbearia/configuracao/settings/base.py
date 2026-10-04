@@ -146,3 +146,36 @@ MIDDLEWARE.insert(0, 'fila.middleware.OcultarRotas404Middleware')
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+# SaaS: contas permanentes, Google OAuth e cobrança isolada por ambiente.
+INSTALLED_APPS += ['saas', 'allauth', 'allauth.account', 'allauth.socialaccount',
+                   'allauth.socialaccount.providers.google']
+MIDDLEWARE += ['allauth.account.middleware.AccountMiddleware', 'saas.middleware.TenantMiddleware']
+AUTHENTICATION_BACKENDS = ['django.contrib.auth.backends.ModelBackend',
+                           'allauth.account.auth_backends.AuthenticationBackend']
+ACCOUNT_ADAPTER = 'saas.adapters.ContaAdapter'
+SOCIALACCOUNT_ADAPTER = 'saas.adapters.GoogleAdapter'
+SOCIALACCOUNT_ONLY = True
+ACCOUNT_EMAIL_VERIFICATION = 'none'
+ACCOUNT_UNIQUE_EMAIL = False
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = False
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = False
+SOCIALACCOUNT_STORE_TOKENS = False
+SOCIALACCOUNT_LOGIN_ON_GET = False
+LOGIN_REDIRECT_URL = '/conta/'
+LOGOUT_REDIRECT_URL = '/'
+SOCIALACCOUNT_PROVIDERS = {'google': {
+    'SCOPE': ['openid', 'email', 'profile'], 'AUTH_PARAMS': {'prompt': 'select_account'},
+    'OAUTH_PKCE_ENABLED': True,
+    'APP': {'client_id': os.environ.get('GOOGLE_CLIENT_ID', ''),
+            'secret': os.environ.get('GOOGLE_CLIENT_SECRET', ''), 'key': ''},
+}}
+SAAS_BASE_URL = os.environ.get('SAAS_BASE_URL', 'http://127.0.0.1:8000')
+SAAS_TOLERANCIA_DIAS = int(os.environ.get('SAAS_TOLERANCIA_DIAS', '3'))
+STRIPE_AMBIENTE = os.environ.get('STRIPE_AMBIENTE', 'test')
+if STRIPE_AMBIENTE not in ('test', 'live'):
+    raise ValueError('STRIPE_AMBIENTE deve ser test ou live')
+STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY', '')
+STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
+STRIPE_PORTAL_CONFIGURATION_ID = os.environ.get('STRIPE_PORTAL_CONFIGURATION_ID', '')
+STRIPE_MAX_TENTATIVAS = 8

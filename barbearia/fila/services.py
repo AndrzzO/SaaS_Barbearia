@@ -17,6 +17,7 @@ from django.db import transaction, OperationalError, IntegrityError
 from django.db.models import Count, Q, Exists, OuterRef
 from django.utils import timezone
 
+from saas.acesso import acesso_operacional, exigir_operacao, dono
 from fila.models import Barbeiro, ParticipacaoFila, StatusParticipacao
 from fila.validators import (
     validar_primeiro_nome,
@@ -98,7 +99,7 @@ def gerar_token_e_hash() -> Tuple[str, str]:
     return token_raw, token_hash
 
 
-def buscar_participacao_por_token(token_raw: Optional[str]) -> Optional[ParticipacaoFila]:
+def buscar_participacao_por_token(token_raw: Optional[str], barbearia_id) -> Optional[ParticipacaoFila]:
     """
     Localiza a participação ativa correspondente ao token temporário fornecido.
     Retorna None se o token for ausente, inválido ou pertencer a participação já excluída.
@@ -107,12 +108,12 @@ def buscar_participacao_por_token(token_raw: Optional[str]) -> Optional[Particip
         return None
     token_hash = calcular_hash_token(token_raw)
     try:
-        return ParticipacaoFila.objects.select_related('barbeiro').get(hash_token_acesso=token_hash)
+        return ParticipacaoFila.objects.select_related('barbeiro').get(hash_token_acesso=token_hash, barbearia_id=barbearia_id)
     except ParticipacaoFila.DoesNotExist:
         return None
 
 
-def listar_cadeiras_publicas() -> List[Dict[str, Any]]:
+def listar_cadeiras_publicas(barbearia_id) -> List[Dict[str, Any]]:
     """
     Retorna a lista de todas as cadeiras cadastradas com informações operacionais públicas.
     Sem N+1 e sem exibir qualquer dado de clientes.
@@ -123,7 +124,7 @@ def listar_cadeiras_publicas() -> List[Dict[str, Any]]:
     )
 
     barbeiros = (
-        Barbeiro.objects.all()
+        Barbeiro.objects.filter(barbearia_id=barbearia_id)
         .annotate(
             quantidade_aguardando=Count(
                 'participacoes',
@@ -155,7 +156,8 @@ def entrar_na_fila(
     sobrenome_raw: str,
     telefone_raw: str,
     data_nascimento_input: Any,
-    token_cliente_atual: Optional[str] = None
+    token_cliente_atual: Optional[str] = None,
+    *, barbearia_id
 ) -> Tuple[ParticipacaoFila, str, bool]:
     """
     Cadastra uma nova participação temporária na fila de um barbeiro.
@@ -165,7 +167,7 @@ def entrar_na_fila(
     """
     # 1. Se cliente já tiver token válido para uma participação existente, reapresenta
     if token_cliente_atual:
-        participacao_existente = buscar_participacao_por_token(token_cliente_atual)
+        participacao_existente = buscar_participacao_por_token(token_cliente_atual, barbearia_id)
         if participacao_existente:
             return participacao_existente, token_cliente_atual, True
 
@@ -185,15 +187,16 @@ def entrar_na_fila(
     def _operacao():
         # Revalida barbeiro dentro da transação imediata
         try:
-            barbeiro = Barbeiro.objects.get(pk=barbeiro_id)
+            barbeiro = Barbeiro.objects.get(pk=barbeiro_id, barbearia_id=barbearia_id)
         except Barbeiro.DoesNotExist:
             raise NaoEncontradoError("Cadeira do barbeiro não encontrada.")
 
+        exigir_operacao(barbeiro.barbearia_id)
         if not barbeiro.ativo or not barbeiro.online:
             raise ConflitoEstadoError("Esta cadeira não está aceitando novas entradas na fila.")
 
         # Revalida duplicidade de telefone
-        if ParticipacaoFila.objects.filter(telefone=telefone).exists():
+        if ParticipacaoFila.objects.filter(barbearia_id=barbearia_id, telefone=telefone).exists():
             raise DuplicidadeTelefoneError(
                 "Não foi possível concluir a entrada. Por favor, procure o barbeiro."
             )
@@ -242,7 +245,7 @@ def tentar_chamar_proximo_interno(barbeiro: Barbeiro) -> Optional[ParticipacaoFi
     Função interna (executada dentro de transação) para chamar o próximo cliente elegível.
     Elegível: status=AGUARDANDO e aguardando_ultrapassagem=False.
     """
-    if not barbeiro.ativo or not barbeiro.online:
+    if not barbeiro.ativo or not barbeiro.online or not acesso_operacional(barbeiro.barbearia_id).permitido:
         return None
 
     # Se já há alguém em atendimento, não chama
@@ -318,7 +321,12 @@ def processar_filas_servico() -> int:
     Varre chamadas vencidas e cadeiras livres que precisam chamar o próximo elegível.
     Retorna a quantidade de operações processadas no ciclo.
     """
+    from saas.models import Barbearia
+    from saas.acesso import aplicar_suspensao
+    import logging
     operacoes = 0
+    for tenant_id in Barbearia.objects.values_list("pk", flat=True).iterator():
+        aplicar_suspensao(tenant_id)
     agora = timezone.now()
 
     # 1. Processa chamadas vencidas
@@ -335,12 +343,17 @@ def processar_filas_servico() -> int:
                 p = ParticipacaoFila.objects.select_related('barbeiro').get(pk=p_id)
             except ParticipacaoFila.DoesNotExist:
                 return 0
+            if not acesso_operacional(p.barbearia_id).permitido:
+                return 0
             if p.status == StatusParticipacao.CHAMADO and p.chamada_expira_em and timezone.now() >= p.chamada_expira_em:
                 processar_expiracao_interna(p.barbeiro, p)
                 return 1
             return 0
 
-        operacoes += executar_com_retentativas_sqlite(_expirar)
+        try:
+            operacoes += executar_com_retentativas_sqlite(_expirar)
+        except FilaError:
+            logging.getLogger(__name__).warning("Falha no ciclo de chamada id=%s", p_id)
 
     # 2. Processa cadeiras online livres sem chamada e sem atendimento
     cadeiras_online = list(
@@ -366,7 +379,10 @@ def processar_filas_servico() -> int:
                 return 1 if res else 0
             return 0
 
-        operacoes += executar_com_retentativas_sqlite(_chamar)
+        try:
+            operacoes += executar_com_retentativas_sqlite(_chamar)
+        except FilaError:
+            logging.getLogger(__name__).warning("Falha no ciclo de cadeira id=%s", b_id)
 
     return operacoes
 
@@ -390,6 +406,7 @@ def iniciar_atendimento(barbeiro: Barbeiro, participacao_id: int, identificador_
     """
     def _operacao():
         b = Barbeiro.objects.select_related('usuario').get(pk=barbeiro.pk)
+        exigir_operacao(b.barbearia_id)
         if not (b.ativo and b.online and b.usuario.is_active):
             raise ConflitoEstadoError("A cadeira está indisponível.")
         try:
@@ -432,6 +449,7 @@ def chamar_proximo_manual(barbeiro: Barbeiro) -> ParticipacaoFila:
     """Ação manual do barbeiro para chamar o próximo elegível na ordem."""
     def _operacao():
         barbeiro.refresh_from_db()
+        exigir_operacao(barbeiro.barbearia_id)
         if not barbeiro.ativo or not barbeiro.online:
             raise ConflitoEstadoError("A cadeira está inativa ou offline.")
 
@@ -465,6 +483,7 @@ def chamar_especifico(barbeiro: Barbeiro, participacao_id: int) -> ParticipacaoF
     """
     def _operacao():
         barbeiro.refresh_from_db()
+        exigir_operacao(barbeiro.barbearia_id)
         if not barbeiro.ativo or not barbeiro.online:
             raise ConflitoEstadoError("A cadeira está inativa ou offline.")
 
@@ -562,7 +581,7 @@ def sair_da_fila(participacao: ParticipacaoFila) -> None:
     return executar_com_retentativas_sqlite(_operacao)
 
 
-def remover_participante(usuario, participacao_id: int) -> None:
+def remover_participante(usuario, participacao_id: int, barbearia_id) -> None:
     """
     Remoção administrativa da fila pelo barbeiro responsável ou pelo proprietário (Passo 11):
     - Exige barbeiro proprietário da fila ou superusuário ativo;
@@ -573,12 +592,12 @@ def remover_participante(usuario, participacao_id: int) -> None:
     """
     def _operacao():
         try:
-            p = ParticipacaoFila.objects.select_related('barbeiro', 'barbeiro__usuario').get(pk=participacao_id)
+            p = ParticipacaoFila.objects.select_related('barbeiro', 'barbeiro__usuario').get(pk=participacao_id, barbearia_id=barbearia_id)
         except ParticipacaoFila.DoesNotExist:
             raise NaoEncontradoError("Participação não encontrada.")
 
         # Validação de autorização
-        is_proprietario = usuario.is_superuser and usuario.is_active
+        is_proprietario = dono(usuario, barbearia_id)
         is_barbeiro_da_cadeira = (p.barbeiro.usuario_id == usuario.id) and usuario.is_active
 
         if not (is_proprietario or is_barbeiro_da_cadeira):
@@ -613,6 +632,7 @@ def alternar_status_cadeira(barbeiro: Barbeiro, ficar_online: bool) -> Barbeiro:
     def _operacao():
         b = Barbeiro.objects.get(pk=barbeiro.pk)
         if ficar_online:
+            exigir_operacao(b.barbearia_id)
             if not b.ativo:
                 raise ConflitoEstadoError("Barbeiro desativado não pode ficar online.")
             b.online = True

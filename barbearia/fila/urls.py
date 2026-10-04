@@ -7,7 +7,8 @@ from django.urls import path
 from fila import views, paginas
 
 urlpatterns = [
-    path('', paginas.aplicativo, name='home'),
+    path('', views.home_cadeiras_publicas, name='home'),
+    path('equipe/', paginas.acesso_equipe),
     path('cadastro/<int:barbeiro_id>/', paginas.aplicativo, {'tela':'cadastro'}, name='cadastro'),
     path('minha-fila/', paginas.aplicativo, {'tela':'acompanhamento'}, name='minha_fila'),
     path('acesso/barbeiro/', paginas.aplicativo, {'tela':'login_barbeiro'}),

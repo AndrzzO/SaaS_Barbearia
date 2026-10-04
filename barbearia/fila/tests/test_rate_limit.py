@@ -20,6 +20,7 @@ class TestRateLimitLogin(TestCase):
     """Testa os limites de tentativas, contagem atômica no SQLite e bloqueios temporários."""
 
     def setUp(self):
+        preparar_tenant()
         self.client = Client()
         self.user_barbeiro = User.objects.create_user(
             username="barbeiro_teste",
@@ -30,7 +31,7 @@ class TestRateLimitLogin(TestCase):
             nome_exibicao="Barbeiro RateLimit",
             ativo=True,
             online=True
-        )
+        , barbearia_id=TENANT_ID)
 
     @override_settings(
         RATE_LIMIT_LOGIN_MAX_TENTATIVAS=5,
@@ -38,7 +39,7 @@ class TestRateLimitLogin(TestCase):
         RATE_LIMIT_LOGIN_BLOQUEIO_MINUTOS=30
     )
     def test_limite_tentativas_e_bloqueio_429(self):
-        url = reverse('barbeiro_login')
+        url = reverse('barbeiro_login', kwargs={'tenant_slug': 'teste'})
         payload = {'username': 'barbeiro_teste', 'senha': 'senha_errada'}
 
         # Com limite configurado para 5:
@@ -115,7 +116,7 @@ class TestRateLimitLogin(TestCase):
         )
 
         # O mesmo IP pode navegar normalmente na home pública
-        url_home = reverse('publico_cadeiras')
+        url_home = reverse('publico_cadeiras', kwargs={'tenant_slug': 'teste'})
         resp_home = self.client.get(url_home, REMOTE_ADDR='192.168.1.200')
         self.assertEqual(resp_home.status_code, 200)
 
@@ -124,7 +125,7 @@ class TestRateLimitLogin(TestCase):
         RATE_LIMIT_LOGIN_MAX_TENTATIVAS=2
     )
     def test_identificacao_ip_proxy_confiavel(self):
-        url = reverse('barbeiro_login')
+        url = reverse('barbeiro_login', kwargs={'tenant_slug': 'teste'})
         payload = {'username': 'invalido', 'senha': 'errada'}
 
         # Conexão vindo do proxy confiável 10.0.0.1 com header X-Forwarded-For
@@ -139,3 +140,5 @@ class TestRateLimitLogin(TestCase):
 
         # O IP registrado no modelo deve ser o IP do cliente (203.0.113.195), e não o proxy
         self.assertTrue(RegistroTentativaLoginIP.objects.filter(ip='203.0.113.195').exists())
+
+from fila.tests.tenant_fixture import TENANT_ID, preparar_tenant, criar_dono

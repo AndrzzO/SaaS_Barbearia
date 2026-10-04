@@ -21,10 +21,11 @@ class TestEndpointsAPI(TestCase):
     """Testa todos os endpoints da API pública, do cliente, do barbeiro e do proprietário."""
 
     def setUp(self):
+        preparar_tenant()
         self.client = Client()
 
         # Cria proprietário (superusuário)
-        self.proprietario_user = User.objects.create_superuser(
+        self.proprietario_user = criar_dono(
             username="proprietario",
             password="senha_proprietario_123"
         )
@@ -40,7 +41,7 @@ class TestEndpointsAPI(TestCase):
             ativo=True,
             online=True,
             proxima_ordem_fila=1
-        )
+        , barbearia_id=TENANT_ID)
 
         # Cria barbeiro 2 (offline)
         self.barbeiro2_user = User.objects.create_user(
@@ -53,14 +54,14 @@ class TestEndpointsAPI(TestCase):
             ativo=True,
             online=False,
             proxima_ordem_fila=1
-        )
+        , barbearia_id=TENANT_ID)
 
     # --------------------------------------------------------------------------
     # 1. PÚBLICO
     # --------------------------------------------------------------------------
 
     def test_home_publica_cadeiras(self):
-        url = reverse('publico_cadeiras')
+        url = reverse('publico_cadeiras', kwargs={'tenant_slug': 'teste'})
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
         dados = resp.json()
@@ -74,7 +75,7 @@ class TestEndpointsAPI(TestCase):
         self.assertNotIn("data_nascimento", json_str)
 
     def test_entrar_na_fila_sucesso(self):
-        url = reverse('publico_entrar_fila', kwargs={'barbeiro_id': self.barbeiro1.id})
+        url = reverse('publico_entrar_fila', kwargs={'tenant_slug': 'teste', 'barbeiro_id': self.barbeiro1.id})
         payload = {
             'primeiro_nome': 'Gabriel',
             'sobrenome': 'Monteiro',
@@ -95,7 +96,7 @@ class TestEndpointsAPI(TestCase):
         self.assertEqual(cookie['samesite'], 'Lax')
 
     def test_entrar_na_fila_validacao_invalida(self):
-        url = reverse('publico_entrar_fila', kwargs={'barbeiro_id': self.barbeiro1.id})
+        url = reverse('publico_entrar_fila', kwargs={'tenant_slug': 'teste', 'barbeiro_id': self.barbeiro1.id})
         # Telefone inválido
         payload = {
             'primeiro_nome': 'Gabriel',
@@ -108,7 +109,7 @@ class TestEndpointsAPI(TestCase):
         self.assertIn('erro', resp.json())
 
     def test_entrar_na_fila_cadeira_offline(self):
-        url = reverse('publico_entrar_fila', kwargs={'barbeiro_id': self.barbeiro2.id})
+        url = reverse('publico_entrar_fila', kwargs={'tenant_slug': 'teste', 'barbeiro_id': self.barbeiro2.id})
         payload = {
             'primeiro_nome': 'Gabriel',
             'sobrenome': 'Monteiro',
@@ -124,7 +125,7 @@ class TestEndpointsAPI(TestCase):
 
     def test_acompanhamento_cliente_contrato_alerta_sonoro(self):
         # Entra na fila para gerar o cookie
-        url_entrar = reverse('publico_entrar_fila', kwargs={'barbeiro_id': self.barbeiro1.id})
+        url_entrar = reverse('publico_entrar_fila', kwargs={'tenant_slug': 'teste', 'barbeiro_id': self.barbeiro1.id})
         payload = {
             'primeiro_nome': 'Gabriel',
             'sobrenome': 'Monteiro',
@@ -135,7 +136,7 @@ class TestEndpointsAPI(TestCase):
         self.assertEqual(resp_entrar.status_code, 201)
 
         # Consulta acompanhamento usando o cookie definido
-        url_acomp = reverse('cliente_acompanhamento')
+        url_acomp = reverse('cliente_acompanhamento', kwargs={'tenant_slug': 'teste'})
         resp_acomp = self.client.get(url_acomp)
         self.assertEqual(resp_acomp.status_code, 200)
         self.assertIn('no-store', resp_acomp['Cache-Control'])
@@ -150,7 +151,7 @@ class TestEndpointsAPI(TestCase):
         self.assertLessEqual(dados['tempo_restante_segundos'], 30)
 
     def test_acompanhamento_apos_exclusao_limpa_cookie(self):
-        url_entrar = reverse('publico_entrar_fila', kwargs={'barbeiro_id': self.barbeiro1.id})
+        url_entrar = reverse('publico_entrar_fila', kwargs={'tenant_slug': 'teste', 'barbeiro_id': self.barbeiro1.id})
         payload = {
             'primeiro_nome': 'Gabriel',
             'sobrenome': 'Monteiro',
@@ -163,7 +164,7 @@ class TestEndpointsAPI(TestCase):
         ParticipacaoFila.objects.filter(telefone='11987654321').delete()
 
         # Próxima consulta deve retornar ENCERRADO e limpar cookie
-        url_acomp = reverse('cliente_acompanhamento')
+        url_acomp = reverse('cliente_acompanhamento', kwargs={'tenant_slug': 'teste'})
         resp_acomp = self.client.get(url_acomp)
         self.assertEqual(resp_acomp.status_code, 200)
         self.assertEqual(resp_acomp.json()['status'], 'ENCERRADO')
@@ -171,7 +172,7 @@ class TestEndpointsAPI(TestCase):
         self.assertEqual(resp_acomp.cookies[settings.FILA_COOKIE_NOME].value, '')
 
     def test_cliente_sair_da_fila(self):
-        url_entrar = reverse('publico_entrar_fila', kwargs={'barbeiro_id': self.barbeiro1.id})
+        url_entrar = reverse('publico_entrar_fila', kwargs={'tenant_slug': 'teste', 'barbeiro_id': self.barbeiro1.id})
         payload = {
             'primeiro_nome': 'Gabriel',
             'sobrenome': 'Monteiro',
@@ -180,7 +181,7 @@ class TestEndpointsAPI(TestCase):
         }
         self.client.post(url_entrar, data=json.dumps(payload), content_type='application/json')
 
-        url_sair = reverse('cliente_sair_fila')
+        url_sair = reverse('cliente_sair_fila', kwargs={'tenant_slug': 'teste'})
         resp_sair = self.client.post(url_sair)
         self.assertEqual(resp_sair.status_code, 200)
         self.assertFalse(ParticipacaoFila.objects.filter(telefone='11987654321').exists())
@@ -190,19 +191,19 @@ class TestEndpointsAPI(TestCase):
     # --------------------------------------------------------------------------
 
     def test_barbeiro_login_sucesso_e_logout(self):
-        url_login = reverse('barbeiro_login')
+        url_login = reverse('barbeiro_login', kwargs={'tenant_slug': 'teste'})
         payload = {'username': 'barbeiro1', 'senha': 'senha_barbeiro_123'}
         resp = self.client.post(url_login, data=json.dumps(payload), content_type='application/json')
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()['barbeiro']['id'], self.barbeiro1.id)
 
         # Painel operacional acessível após login
-        url_painel = reverse('barbeiro_painel')
+        url_painel = reverse('barbeiro_painel', kwargs={'tenant_slug': 'teste'})
         resp_painel = self.client.get(url_painel)
         self.assertEqual(resp_painel.status_code, 200)
 
         # Logout
-        url_logout = reverse('barbeiro_logout')
+        url_logout = reverse('barbeiro_logout', kwargs={'tenant_slug': 'teste'})
         resp_logout = self.client.post(url_logout)
         self.assertEqual(resp_logout.status_code, 200)
 
@@ -218,14 +219,14 @@ class TestEndpointsAPI(TestCase):
             sobrenome_raw="Mendes",
             telefone_raw="(11) 98765-4321",
             data_nascimento_input=date(1995, 4, 10)
-        )
+        , barbearia_id=TENANT_ID)
         self.assertEqual(p1.status, StatusParticipacao.CHAMADO)
 
         # Loga como barbeiro
         self.client.login(username='barbeiro1', password='senha_barbeiro_123')
 
         # Inicia atendimento com identificador de chamada correto
-        url_iniciar = reverse('barbeiro_iniciar_atendimento', kwargs={'participacao_id': p1.id})
+        url_iniciar = reverse('barbeiro_iniciar_atendimento', kwargs={'tenant_slug': 'teste', 'participacao_id': p1.id})
         payload_iniciar = {'identificador_chamada': str(p1.identificador_chamada)}
         resp_iniciar = self.client.post(url_iniciar, data=json.dumps(payload_iniciar), content_type='application/json')
         self.assertEqual(resp_iniciar.status_code, 200)
@@ -235,7 +236,7 @@ class TestEndpointsAPI(TestCase):
         self.assertEqual(p1.status, StatusParticipacao.EM_ATENDIMENTO)
 
         # Finaliza o corte
-        url_finalizar = reverse('barbeiro_finalizar_corte', kwargs={'participacao_id': p1.id})
+        url_finalizar = reverse('barbeiro_finalizar_corte', kwargs={'tenant_slug': 'teste', 'participacao_id': p1.id})
         resp_finalizar = self.client.post(url_finalizar)
         self.assertEqual(resp_finalizar.status_code, 200)
 
@@ -250,13 +251,13 @@ class TestEndpointsAPI(TestCase):
         self.client.login(username='proprietario', password='senha_proprietario_123')
 
         # Visão geral
-        url_visao = reverse('proprietario_visao_geral')
+        url_visao = reverse('proprietario_visao_geral', kwargs={'tenant_slug': 'teste'})
         resp_visao = self.client.get(url_visao)
         self.assertEqual(resp_visao.status_code, 200)
         self.assertEqual(resp_visao.json()['estatisticas']['total_cadeiras'], 2)
 
         # Cadastrar novo barbeiro
-        url_cadastrar = reverse('proprietario_cadastrar_barbeiro')
+        url_cadastrar = reverse('proprietario_cadastrar_barbeiro', kwargs={'tenant_slug': 'teste'})
         payload_cadastrar = {
             'username': 'novobarbeiro',
             'senha': 'senha_novo_123',
@@ -267,19 +268,19 @@ class TestEndpointsAPI(TestCase):
         novo_id = resp_cadastrar.json()['barbeiro_id']
 
         # Editar nome de exibição
-        url_editar = reverse('proprietario_editar_barbeiro', kwargs={'barbeiro_id': novo_id})
+        url_editar = reverse('proprietario_editar_barbeiro', kwargs={'tenant_slug': 'teste', 'barbeiro_id': novo_id})
         payload_editar = {'nome_exibicao': 'Barbeiro Thiago Silva'}
         resp_editar = self.client.post(url_editar, data=json.dumps(payload_editar), content_type='application/json')
         self.assertEqual(resp_editar.status_code, 200)
 
         # Redefinir senha
-        url_senha = reverse('proprietario_redefinir_senha', kwargs={'barbeiro_id': novo_id})
+        url_senha = reverse('proprietario_redefinir_senha', kwargs={'tenant_slug': 'teste', 'barbeiro_id': novo_id})
         payload_senha = {'nova_senha': 'nova_senha_segura_999'}
         resp_senha = self.client.post(url_senha, data=json.dumps(payload_senha), content_type='application/json')
         self.assertEqual(resp_senha.status_code, 200)
 
         # Desativar barbeiro
-        url_status = reverse('proprietario_status_barbeiro', kwargs={'barbeiro_id': novo_id})
+        url_status = reverse('proprietario_status_barbeiro', kwargs={'tenant_slug': 'teste', 'barbeiro_id': novo_id})
         payload_status = {'ativo': False}
         resp_status = self.client.post(url_status, data=json.dumps(payload_status), content_type='application/json')
         self.assertEqual(resp_status.status_code, 200)
@@ -288,6 +289,8 @@ class TestEndpointsAPI(TestCase):
     def test_isolamento_barbeiro_bloqueado_na_gestao(self):
         # Barbeiro comum autenticado não pode acessar rotas de proprietário
         self.client.login(username='barbeiro1', password='senha_barbeiro_123')
-        url_visao = reverse('proprietario_visao_geral')
+        url_visao = reverse('proprietario_visao_geral', kwargs={'tenant_slug': 'teste'})
         resp = self.client.get(url_visao)
         self.assertEqual(resp.status_code, 403)
+
+from fila.tests.tenant_fixture import TENANT_ID, preparar_tenant, criar_dono

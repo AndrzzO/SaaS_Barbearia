@@ -1,0 +1,15 @@
+{% load static %}<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#001b2c"><title>{% block title %}Guild Tech Support — Fila para barbearias{% endblock %}</title><meta name="description" content="Organize a fila da sua barbearia com a Guild Tech Support. Plano mensal de R$100."><link rel="stylesheet" href="{% static 'saas/site.css' %}"><script src="{% static 'saas/site.js' %}" defer></script></head><body class="{% block body_class %}{% endblock %}">
+<svg class="svg-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h16m-7-7 7 7-7 7"/></symbol>
+<symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 3 9 9-9 9"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="12" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4m-4 5v3"/></symbol>
+<symbol id="i-phone" viewBox="0 0 48 48"><rect x="8" y="2" width="32" height="44" rx="5"/><rect x="17" y="14" width="14" height="20" rx="2"/><path d="M20 8h8m-7 32h6"/></symbol>
+<symbol id="i-scissors" viewBox="0 0 48 48"><circle cx="12" cy="37" r="6"/><circle cx="35" cy="37" r="6"/><path d="m16 32 24-28c2-3 3 0 1 4L28 29M31 32 8 4C6 1 5 4 7 8l14 21"/></symbol>
+<symbol id="i-bars" viewBox="0 0 48 48"><rect x="3" y="3" width="42" height="42" rx="5"/><path d="M14 33V24m10 9V17m10 16V10" stroke-width="5"/></symbol>
+<symbol id="i-shield" viewBox="0 0 32 36"><path d="m16 2 12 5v12c0 7-12 14-12 14S4 26 4 19V7Zm-6 14 4 4 8-9"/></symbol>
+<symbol id="i-calendar" viewBox="0 0 32 36"><rect x="3" y="6" width="26" height="26" rx="3"/><path d="M9 2v8m14-8v8M3 15h26M9 20h2m4 0h2m4 0h2M9 25h2m4 0h2"/></symbol>
+<symbol id="i-instagram" viewBox="0 0 28 28"><rect x="3" y="3" width="22" height="22" rx="6"/><circle cx="14" cy="14" r="5"/><circle cx="21" cy="7" r="1"/></symbol>
+<symbol id="i-youtube" viewBox="0 0 28 28"><rect x="2" y="5" width="24" height="18" rx="5"/><path d="m12 10 7 4-7 4Z"/></symbol>
+<symbol id="i-whatsapp" viewBox="0 0 28 28"><path d="M5 21 3 26l6-2a11 11 0 1 0-4-3Z"/><path d="M10 8c-5 5 5 15 10 10l-4-3-2 2-3-4 1-2Z"/></symbol></svg>
+<a class="skip-link" href="#conteudo">Pular para o conteúdo</a>{% block content %}{% endblock %}
+<dialog id="informacao" class="info-dialog"><button type="button" class="dialog-close" aria-label="Fechar">×</button><h2 id="info-titulo"></h2><p id="info-texto"></p></dialog></body></html>

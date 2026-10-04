@@ -32,6 +32,7 @@ class TestConcorrenciaSQLite(TransactionTestCase):
     """Testa contenção, corridas de transação e atomicidade no SQLite."""
 
     def setUp(self):
+        preparar_tenant()
         self.user_barbeiro = User.objects.create_user(
             username="barbeiro_concorrencia",
             password="senha_concorrencia_123"
@@ -42,7 +43,7 @@ class TestConcorrenciaSQLite(TransactionTestCase):
             ativo=True,
             online=True,
             proxima_ordem_fila=1
-        )
+        , barbearia_id=TENANT_ID)
 
     def test_duas_entradas_simultaneas_mesmo_telefone(self):
         """Duas requisições simultâneas com o mesmo telefone: apenas uma pode ser criada."""
@@ -58,7 +59,7 @@ class TestConcorrenciaSQLite(TransactionTestCase):
                     sobrenome_raw="Teste",
                     telefone_raw="(11) 98888-7777",
                     data_nascimento_input=date(1995, 1, 1)
-                )
+                , barbearia_id=TENANT_ID)
                 resultados.append((p, ja_existia))
             except Exception as e:
                 erros.append(e)
@@ -87,7 +88,7 @@ class TestConcorrenciaSQLite(TransactionTestCase):
             sobrenome_raw="Mendes",
             telefone_raw="(11) 98765-4321",
             data_nascimento_input=date(1995, 4, 10)
-        )
+        , barbearia_id=TENANT_ID)
         identificador = str(p1.identificador_chamada)
 
         resultados = []
@@ -126,7 +127,7 @@ class TestConcorrenciaSQLite(TransactionTestCase):
             sobrenome_raw="Mendes",
             telefone_raw="(11) 98765-4321",
             data_nascimento_input=date(1995, 4, 10)
-        )
+        , barbearia_id=TENANT_ID)
         identificador = str(p1.identificador_chamada)
 
         # Simula expiração
@@ -150,7 +151,7 @@ class TestConcorrenciaSQLite(TransactionTestCase):
             sobrenome_raw="Mendes",
             telefone_raw="(11) 98765-4321",
             data_nascimento_input=date(1995, 4, 10)
-        )
+        , barbearia_id=TENANT_ID)
         ciclo_antigo = str(uuid.uuid4())  # Ciclo diferente do atual
 
         with self.assertRaises(ConflitoEstadoError):
@@ -165,7 +166,7 @@ class TestConcorrenciaSQLite(TransactionTestCase):
             sobrenome_raw="Faltoso",
             telefone_raw="(11) 98765-4321",
             data_nascimento_input=date(1995, 4, 10)
-        )
+        , barbearia_id=TENANT_ID)
         # P2 entra
         p2, _, _ = entrar_na_fila(
             barbeiro_id=self.barbeiro.id,
@@ -173,7 +174,7 @@ class TestConcorrenciaSQLite(TransactionTestCase):
             sobrenome_raw="Presente",
             telefone_raw="(11) 98765-4322",
             data_nascimento_input=date(1994, 2, 10)
-        )
+        , barbearia_id=TENANT_ID)
 
         # P1 expira
         p1.chamada_iniciada_em = timezone.now() - timedelta(seconds=40)
@@ -194,3 +195,5 @@ class TestConcorrenciaSQLite(TransactionTestCase):
         # Exatamente 1 ultrapassagem!
         self.assertEqual(p1.ultrapassagens_por_falta, 1)
         self.assertFalse(p1.aguardando_ultrapassagem)
+
+from fila.tests.tenant_fixture import TENANT_ID, preparar_tenant, criar_dono

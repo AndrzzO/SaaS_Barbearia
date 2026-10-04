@@ -12,6 +12,7 @@ from django.utils import timezone
 
 
 class Barbeiro(models.Model):
+    barbearia = models.ForeignKey("saas.Barbearia", on_delete=models.PROTECT, related_name="barbeiros")
     """
     Representa o barbeiro associado a uma cadeira de atendimento (relação 1:1 no MVP).
     """
@@ -88,7 +89,8 @@ class Barbeiro(models.Model):
     @property
     def aceita_entrada(self) -> bool:
         """Indica se a cadeira aceita novas entradas na fila."""
-        return self.ativo and self.online
+        from saas.acesso import acesso_operacional
+        return self.ativo and self.online and acesso_operacional(self.barbearia_id).permitido
 
 
 class StatusParticipacao(models.TextChoices):
@@ -98,6 +100,17 @@ class StatusParticipacao(models.TextChoices):
 
 
 class ParticipacaoFila(models.Model):
+    barbearia = models.ForeignKey("saas.Barbearia", on_delete=models.PROTECT, related_name="participacoes")
+
+    def save(self, *args, **kwargs):
+        from django.core.exceptions import ValidationError
+        tenant = Barbeiro.objects.values_list("barbearia_id", flat=True).get(pk=self.barbeiro_id)
+        if self.barbearia_id is None:
+            self.barbearia_id = tenant
+        if self.barbearia_id != tenant:
+            raise ValidationError("Participação e cadeira devem pertencer à mesma barbearia.")
+        return super().save(*args, **kwargs)
+
     """
     Participação temporária de um cliente na fila de uma cadeira.
     Não existe cadastro permanente de cliente nem histórico após encerramento.
@@ -125,7 +138,6 @@ class ParticipacaoFila(models.Model):
     )
     telefone = models.CharField(
         max_length=20,
-        unique=True,
         db_index=True,
         verbose_name="Telefone normalizado"
     )
@@ -186,8 +198,8 @@ class ParticipacaoFila(models.Model):
         constraints = [
             # 1. Telefone normalizado único entre todas as participações existentes
             models.UniqueConstraint(
-                fields=['telefone'],
-                name='unique_participacao_telefone'
+                fields=['barbearia', 'telefone'],
+                name='unique_tenant_telefone'
             ),
             # 2. Ordem da fila única por barbeiro
             models.UniqueConstraint(

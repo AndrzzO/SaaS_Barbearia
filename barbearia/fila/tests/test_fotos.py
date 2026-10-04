@@ -10,12 +10,13 @@ from fila.admin import BarbeiroAdmin, site_proprietario
 
 class FotosBarbeiroTests(TestCase):
     def setUp(self):
+        preparar_tenant()
         self.pasta=TemporaryDirectory()
         self.config=override_settings(MEDIA_ROOT=self.pasta.name)
         self.config.enable()
         self.addCleanup(self.pasta.cleanup)
         self.addCleanup(self.config.disable)
-        self.dono=get_user_model().objects.create_superuser('dono_foto',password='Senha-exclusiva-928!')
+        self.dono=criar_dono('dono_foto',password='Senha-exclusiva-928!')
         self.client.force_login(self.dono)
 
     def foto(self, cor='red'):
@@ -26,7 +27,7 @@ class FotosBarbeiroTests(TestCase):
     def criar(self, foto=None):
         dados={'username':'barbeiro_foto','senha':'Senha-exclusiva-567!','nome_exibicao':'Meu Barbeiro'}
         if foto is not None: dados['foto']=foto
-        return self.client.post('/api/proprietario/barbeiros/cadastrar/',dados)
+        return self.client.post('/b/teste/api/proprietario/barbeiros/cadastrar/',dados)
 
     def test_upload_multipart_e_foto_publica(self):
         resposta=self.criar(self.foto())
@@ -37,9 +38,9 @@ class FotosBarbeiroTests(TestCase):
         with Image.open(b.foto.path) as foto:
             self.assertEqual(foto.format,'JPEG')
             self.assertFalse(foto.getexif())
-        dados=self.client.get('/api/publico/cadeiras/').json()['cadeiras'][0]
+        dados=self.client.get('/b/teste/api/publico/cadeiras/').json()['cadeiras'][0]
         self.assertEqual(dados['foto_url'],b.foto.url)
-        self.assertEqual(self.client.get('/api/proprietario/barbeiros/').json()['barbeiros'][0]['foto_url'],b.foto.url)
+        self.assertEqual(self.client.get('/b/teste/api/proprietario/barbeiros/').json()['barbeiros'][0]['foto_url'],b.foto.url)
 
     def test_upload_opcional(self):
         resposta=self.criar()
@@ -49,7 +50,7 @@ class FotosBarbeiroTests(TestCase):
     def test_troca_e_remocao_excluem_arquivo_anterior(self):
         b=Barbeiro.objects.get(pk=self.criar(self.foto()).json()['barbeiro_id'])
         anterior=b.foto.path
-        url=f'/api/proprietario/barbeiros/{b.pk}/editar/'
+        url=f'/b/teste/api/proprietario/barbeiros/{b.pk}/editar/'
         with self.captureOnCommitCallbacks(execute=True):
             resposta=self.client.post(url,{'nome_exibicao':'Nome novo','foto':self.foto('blue')})
         self.assertEqual(resposta.status_code,200,resposta.content)
@@ -83,7 +84,7 @@ class FotosBarbeiroTests(TestCase):
     def test_editar_nome_sem_foto_preserva_foto(self):
         b=Barbeiro.objects.get(pk=self.criar(self.foto()).json()['barbeiro_id'])
         anterior=b.foto.name
-        resposta=self.client.post(f'/api/proprietario/barbeiros/{b.pk}/editar/',{'nome_exibicao':'Novo nome'})
+        resposta=self.client.post(f'/b/teste/api/proprietario/barbeiros/{b.pk}/editar/',{'nome_exibicao':'Novo nome'})
         self.assertEqual(resposta.status_code,200)
         b.refresh_from_db();self.assertEqual(b.foto.name,anterior)
 
@@ -94,3 +95,5 @@ class FotosBarbeiroTests(TestCase):
         request.user=self.dono
         form=BarbeiroAdmin(Barbeiro,site_proprietario).get_form(request)
         self.assertIn('foto',form.base_fields)
+
+from fila.tests.tenant_fixture import TENANT_ID, preparar_tenant, criar_dono

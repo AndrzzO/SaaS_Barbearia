@@ -6,7 +6,9 @@ from django.contrib import admin
 from django.urls import path, include
 
 urlpatterns = [
-    path('', include('fila.urls')),
+    path('', include('saas.urls')),
+    path('accounts/', include('allauth.urls')),
+    path('b/<slug:tenant_slug>/', include('fila.urls')),
 ]
 
 from django.conf import settings

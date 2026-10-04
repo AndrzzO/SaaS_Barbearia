@@ -47,6 +47,8 @@ from fila.services import (
     ContencaoBancoDadosError,
 )
 
+from saas.acesso import dono, direito_financeiro, provisionar
+
 User = get_user_model()
 
 
@@ -121,6 +123,8 @@ def requer_barbeiro_autenticado(view_func):
         if not hasattr(request.user, 'barbeiro'):
             return resposta_json_no_store({'erro': "Usuário não vinculado a uma cadeira de barbeiro."}, status=403)
         barbeiro = request.user.barbeiro
+        if barbeiro.barbearia_id != request.barbearia.pk:
+            return resposta_json_no_store({"erro": "Cadeira de outra barbearia."}, status=403)
         if not barbeiro.ativo:
             return resposta_json_no_store({'erro': "Cadeira desativada pelo proprietário."}, status=403)
         return view_func(request, barbeiro, *args, **kwargs)
@@ -133,7 +137,7 @@ def requer_proprietario_autenticado(view_func):
     def wrapper(request: HttpRequest, *args, **kwargs):
         if not request.user.is_authenticated:
             return resposta_json_no_store({'erro': "Autenticação obrigatória."}, status=401)
-        if not (request.user.is_active and request.user.is_superuser):
+        if not dono(request.user, request.barbearia.pk):
             return resposta_json_no_store({'erro': "Acesso restrito ao proprietário."}, status=403)
         return view_func(request, *args, **kwargs)
     return wrapper
@@ -150,8 +154,8 @@ def home_cadeiras_publicas(request: HttpRequest) -> JsonResponse:
     Retorna a listagem de todas as cadeiras cadastradas com disponibilidade operacional.
     Não revela dados de clientes nem listas nominais.
     """
-    cadeiras = listar_cadeiras_publicas()
-    return JsonResponse({
+    cadeiras = listar_cadeiras_publicas(request.barbearia.pk)
+    return resposta_json_no_store({
         'cadeiras': cadeiras,
         'horario_servidor': timezone.now().isoformat(),
     })
@@ -173,7 +177,7 @@ def cliente_entrar_na_fila(request: HttpRequest, barbeiro_id: int) -> HttpRespon
         sobrenome_raw=dados.get('sobrenome', ''),
         telefone_raw=dados.get('telefone', ''),
         data_nascimento_input=dados.get('data_nascimento', ''),
-        token_cliente_atual=token_atual
+        token_cliente_atual=token_atual, barbearia_id=request.barbearia.pk
     )
 
     status_code = 200 if ja_existia else 201
@@ -193,7 +197,7 @@ def cliente_entrar_na_fila(request: HttpRequest, barbeiro_id: int) -> HttpRespon
         httponly=settings.FILA_COOKIE_HTTPONLY,
         secure=settings.FILA_COOKIE_SECURE,
         samesite=settings.FILA_COOKIE_SAMESITE,
-        path='/'
+        path=request.tenant_prefix + '/'
     )
     return resp
 
@@ -210,7 +214,7 @@ def cliente_acompanhamento(request: HttpRequest) -> JsonResponse:
     Se a participação já foi encerrada ou o cookie for inválido, limpa o cookie.
     """
     token_cookie = request.COOKIES.get(settings.FILA_COOKIE_NOME)
-    participacao = buscar_participacao_por_token(token_cookie)
+    participacao = buscar_participacao_por_token(token_cookie, request.barbearia.pk)
 
     if not participacao:
         resp = resposta_json_no_store({
@@ -218,7 +222,7 @@ def cliente_acompanhamento(request: HttpRequest) -> JsonResponse:
             'mensagem': 'Participação encerrada.',
             'horario_servidor': timezone.now().isoformat(),
         }, status=200)
-        resp.delete_cookie(settings.FILA_COOKIE_NOME, path='/')
+        resp.delete_cookie(settings.FILA_COOKIE_NOME, path=request.tenant_prefix + '/')
         return resp
 
     agora = timezone.now()
@@ -261,17 +265,17 @@ def cliente_acompanhamento(request: HttpRequest) -> JsonResponse:
 def cliente_sair_da_fila(request: HttpRequest) -> HttpResponse:
     """Permite ao próprio cliente sair da fila quando estiver AGUARDANDO ou CHAMADO."""
     token_cookie = request.COOKIES.get(settings.FILA_COOKIE_NOME)
-    participacao = buscar_participacao_por_token(token_cookie)
+    participacao = buscar_participacao_por_token(token_cookie, request.barbearia.pk)
 
     if not participacao:
         resp = resposta_json_no_store({'mensagem': "Você não possui uma participação ativa na fila."}, status=200)
-        resp.delete_cookie(settings.FILA_COOKIE_NOME, path='/')
+        resp.delete_cookie(settings.FILA_COOKIE_NOME, path=request.tenant_prefix + '/')
         return resp
 
     sair_da_fila(participacao)
 
     resp = resposta_json_no_store({'mensagem': "Saída da fila realizada com sucesso."})
-    resp.delete_cookie(settings.FILA_COOKIE_NOME, path='/')
+    resp.delete_cookie(settings.FILA_COOKIE_NOME, path=request.tenant_prefix + '/')
     return resp
 
 
@@ -298,7 +302,7 @@ def barbeiro_login(request: HttpRequest) -> JsonResponse:
     if user is None or not user.is_active:
         return resposta_json_no_store({'erro': "Credenciais inválidas ou usuário inativo."}, status=401)
 
-    if not hasattr(user, 'barbeiro') or not user.barbeiro.ativo:
+    if not hasattr(user, 'barbeiro') or not user.barbeiro.ativo or user.barbeiro.barbearia_id != request.barbearia.pk:
         return resposta_json_no_store({'erro': "Credenciais inválidas ou usuário inativo."}, status=401)
 
     login(request, user)
@@ -436,7 +440,7 @@ def barbeiro_finalizar_corte(request: HttpRequest, barbeiro: Barbeiro, participa
 @tratar_excecoes_fila
 def barbeiro_remover_participante(request: HttpRequest, barbeiro: Barbeiro, participacao_id: int) -> JsonResponse:
     """Remove participante em espera ou chamado (Passo 11)."""
-    remover_participante(request.user, participacao_id)
+    remover_participante(request.user, participacao_id, request.barbearia.pk)
     return resposta_json_no_store({
         'mensagem': "Participante removido da fila com sucesso.",
     })
@@ -450,19 +454,7 @@ def barbeiro_remover_participante(request: HttpRequest, barbeiro: Barbeiro, part
 @tratar_excecoes_fila
 def proprietario_login(request: HttpRequest) -> JsonResponse:
     """Login administrativo do proprietário com rate limiting dedicado."""
-    ip = obter_ip_cliente(request)
-    registrar_e_validar_tentativa_login(ip, escopo='proprietario')
-
-    dados = extrair_json(request)
-    usuario = dados.get('username', '').strip()
-    senha = dados.get('senha', '')
-
-    user = authenticate(request, username=usuario, password=senha)
-    if user is None or not user.is_active or not user.is_superuser:
-        return resposta_json_no_store({'erro': "Credenciais inválidas ou usuário não autorizado."}, status=401)
-
-    login(request, user)
-    return resposta_json_no_store({'mensagem': "Login administrativo realizado com sucesso."})
+    return resposta_json_no_store({"erro": "Use o login Google em /accounts/google/login/."}, status=403)
 
 
 @require_POST
@@ -476,7 +468,7 @@ def proprietario_logout(request: HttpRequest) -> JsonResponse:
 @requer_proprietario_autenticado
 def proprietario_visao_geral(request: HttpRequest) -> JsonResponse:
     """Visão geral executiva de todas as cadeiras e filas ativas (Passo 16)."""
-    cadeiras = listar_cadeiras_publicas()
+    cadeiras = listar_cadeiras_publicas(request.barbearia.pk)
     total_aguardando = sum(c['quantidade_aguardando'] for c in cadeiras)
     total_em_atendimento = sum(1 for c in cadeiras if c['atendimento_em_andamento'])
 
@@ -495,7 +487,7 @@ def proprietario_visao_geral(request: HttpRequest) -> JsonResponse:
 @requer_proprietario_autenticado
 def proprietario_listar_barbeiros(request: HttpRequest) -> JsonResponse:
     """Lista todos os barbeiros cadastrados no sistema."""
-    barbeiros = Barbeiro.objects.select_related('usuario').all().order_by('nome_exibicao')
+    barbeiros = Barbeiro.objects.select_related('usuario').filter(barbearia=request.barbearia).order_by('nome_exibicao')
     lista = []
     for b in barbeiros:
         lista.append({
@@ -535,9 +527,12 @@ def proprietario_cadastrar_barbeiro(request: HttpRequest) -> JsonResponse:
     def criar():
         user = User.objects.create_user(username=username, password=senha,
             is_staff=False, is_superuser=False, is_active=True)
-        return Barbeiro.objects.create(usuario=user, nome_exibicao=nome_exibicao,
+        return Barbeiro.objects.create(barbearia=request.barbearia, usuario=user, nome_exibicao=nome_exibicao,
             ativo=True, online=False, proxima_ordem_fila=1, foto=request.FILES.get('foto', ''))
+    if not direito_financeiro(request.barbearia).permitido:
+        raise ConflitoEstadoError("Assinatura válida necessária para configurar equipe.")
     barbeiro = executar_com_retentativas_sqlite(criar)
+    provisionar(request.barbearia.pk)
 
     return resposta_json_no_store({
         'mensagem': f"Barbeiro {nome_exibicao} cadastrado com sucesso.",
@@ -552,7 +547,7 @@ def proprietario_cadastrar_barbeiro(request: HttpRequest) -> JsonResponse:
 def proprietario_editar_barbeiro(request: HttpRequest, barbeiro_id: int) -> JsonResponse:
     """Edita dados cadastrais do barbeiro (nome de exibição)."""
     try:
-        barbeiro = Barbeiro.objects.get(pk=barbeiro_id)
+        barbeiro = Barbeiro.objects.get(pk=barbeiro_id, barbearia=request.barbearia)
     except Barbeiro.DoesNotExist:
         return resposta_json_no_store({'erro': "Barbeiro não encontrado."}, status=404)
 
@@ -581,7 +576,7 @@ def proprietario_editar_barbeiro(request: HttpRequest, barbeiro_id: int) -> Json
 def proprietario_redefinir_senha_barbeiro(request: HttpRequest, barbeiro_id: int) -> JsonResponse:
     """Redefine a senha de acesso de um barbeiro (Passo 16)."""
     try:
-        barbeiro = Barbeiro.objects.select_related('usuario').get(pk=barbeiro_id)
+        barbeiro = Barbeiro.objects.select_related('usuario').get(pk=barbeiro_id, barbearia=request.barbearia)
     except Barbeiro.DoesNotExist:
         return resposta_json_no_store({'erro': "Barbeiro não encontrado."}, status=404)
 
@@ -605,7 +600,7 @@ def proprietario_alternar_status_barbeiro(request: HttpRequest, barbeiro_id: int
     Ao desativar: rejeita se em atendimento, limpa a fila, coloca offline e desativa conta.
     """
     try:
-        barbeiro = Barbeiro.objects.get(pk=barbeiro_id)
+        barbeiro = Barbeiro.objects.get(pk=barbeiro_id, barbearia=request.barbearia)
     except Barbeiro.DoesNotExist:
         return resposta_json_no_store({'erro': "Barbeiro não encontrado."}, status=404)
 
@@ -633,7 +628,7 @@ def proprietario_alternar_status_barbeiro(request: HttpRequest, barbeiro_id: int
 @requer_proprietario_autenticado
 def proprietario_filas_ativas(request: HttpRequest) -> JsonResponse:
     """Consulta todas as participações ativas de todas as cadeiras (Passo 16)."""
-    participacoes = ParticipacaoFila.objects.select_related('barbeiro').all().order_by('barbeiro__nome_exibicao', 'ordem_fila')
+    participacoes = ParticipacaoFila.objects.select_related('barbeiro').filter(barbearia=request.barbearia).order_by('barbeiro__nome_exibicao', 'ordem_fila')
     lista = []
     for p in participacoes:
         lista.append({
@@ -658,5 +653,5 @@ def proprietario_filas_ativas(request: HttpRequest) -> JsonResponse:
 @tratar_excecoes_fila
 def proprietario_remover_participante(request: HttpRequest, participacao_id: int) -> JsonResponse:
     """Proprietário remove qualquer participante em AGUARDANDO ou CHAMADO."""
-    remover_participante(request.user, participacao_id)
+    remover_participante(request.user, participacao_id, request.barbearia.pk)
     return resposta_json_no_store({'mensagem': "Participante removido da fila pelo proprietário com sucesso."})
